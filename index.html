@@ -1,0 +1,189 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#241c38">
+<title>My Bodypump</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f5f2fa;color:#292337;font:16px system-ui,-apple-system,sans-serif}
+header{background:#241c38;color:white;padding:25px 18px}
+header h1{margin:0;font-size:25px}
+main{max-width:650px;margin:auto;padding:16px}
+.card{background:white;padding:17px;border-radius:16px;margin-bottom:14px;box-shadow:0 2px 12px #25183b0b}
+h2{font-size:19px;margin:0 0 12px}
+label{display:block;font-size:14px;font-weight:600;margin:12px 0 5px}
+input,select,textarea{width:100%;padding:12px;border:1px solid #d6d0e1;border-radius:9px;font:inherit;background:white;color:#292337}
+button{background:#6650a4;color:white;border:0;border-radius:10px;padding:12px 15px;font:inherit;font-weight:600;cursor:pointer}
+button.secondary{background:#eee8f7;color:#46366c}
+button.danger{background:#fbe6e8;color:#a32738}
+button:disabled{opacity:.5}
+.row{display:flex;gap:9px;align-items:center}
+.row>*{flex:1;min-width:0}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.small{font-size:13px;color:#716a7e}
+.track{border-top:1px solid #eee;padding:13px 0}
+.track:first-child{border:0}
+.pill{display:inline-block;background:#eee8f7;color:#55417f;border-radius:20px;padding:5px 10px;font-size:12px}
+.hidden{display:none}
+.total{background:#f1ebfa;border-radius:10px;padding:12px;margin-top:12px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<header><h1>🏋️ My Bodypump</h1><div>Mi registro personal de entrenamiento</div></header>
+<main>
+<section class="card">
+<h2>Mis rutinas</h2>
+<div class="row">
+<select id="routine"></select>
+<button onclick="addRoutine()">+ Nueva</button>
+</div>
+<div class="actions" style="margin-top:12px">
+<button onclick="show('session')">Registrar sesión</button>
+<button class="secondary" onclick="show('history')">Historial</button>
+<button class="secondary" onclick="show('backup')">Respaldos</button>
+</div>
+</section>
+
+<section id="session" class="card">
+<h2>Nueva sesión</h2>
+<label>Fecha</label><input type="date" id="date">
+<p class="small">Los pesos se registran en libras. B indica discos por lado, sin incluir la barra.</p>
+<div id="tracks"></div>
+<button onclick="saveSession()">Guardar entrenamiento</button>
+</section>
+
+<section id="history" class="card hidden">
+<h2>Historial</h2>
+<div id="historyList"></div>
+</section>
+
+<section id="backup" class="card hidden">
+<h2>Respaldo de datos</h2>
+<p class="small">Exporta regularmente tus registros. Los datos se guardan en este navegador, no en GitHub.</p>
+<button onclick="exportData()">Descargar respaldo JSON</button>
+<label>Restaurar respaldo JSON</label>
+<input type="file" accept=".json,application/json" id="restore" onchange="restoreData(event)">
+</section>
+</main>
+<script>
+const names=["Warmup","Squats","Chest","Back","Triceps","Biceps","Lunges","Shoulders","Core","Cooldown"];
+const $=id=>document.getElementById(id);
+const key="mybodypump_v1";
+const initial={routines:["115"],sessions:[]};
+let db;
+try{db=JSON.parse(localStorage.getItem(key))||initial}catch(e){db=initial}
+if(!Array.isArray(db.routines))db.routines=["115"];
+if(!Array.isArray(db.sessions))db.sessions=[];
+const save=()=>localStorage.setItem(key,JSON.stringify(db));
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+$("date").value=new Date().toLocaleDateString("en-CA");
+function renderRoutines(){
+const old=$("routine").value;
+$("routine").innerHTML=db.routines.map(r=>`<option value="${esc(r)}">Bodypump ${esc(r)}</option>`).join("");
+if(db.routines.includes(old))$("routine").value=old;
+renderTracks();
+}
+function addRoutine(){
+const r=prompt("Número de Bodypump (ej. 116)");
+if(r===null)return;
+const n=r.trim();
+if(!/^\d{1,4}$/.test(n)){alert("Introduce un número válido");return}
+if(!db.routines.includes(n)){db.routines.push(n);save()}
+renderRoutines();$("routine").value=n;renderTracks();
+}
+function show(id){
+["session","history","backup"].forEach(x=>$(x).classList.toggle("hidden",x!==id));
+if(id==="history")renderHistory();
+}
+function lastSession(){
+return [...db.sessions].reverse().find(s=>s.routine===$("routine").value);
+}
+function renderTracks(){
+const last=lastSession();
+$("tracks").innerHTML=names.map((name,i)=>{
+const old=last?.entries?.find(e=>e.name===name);
+return `<div class="track" data-track="${name}">
+<h3>${i+1}. ${name}</h3>
+<div class="row">
+<div><label>Equipo</label><select class="equipment" onchange="changeEquipment(this)">
+<option value="none">Sin registrar</option><option value="bar">Barra</option><option value="weights">Pesas</option>
+</select></div>
+<div><label>Peso (lb)</label><input class="weight" type="number" min="0" step="0.5" placeholder="Ej. 8"></div>
+</div>
+<div class="quantity hidden"><label>Cantidad de pesas</label>
+<select class="qty"><option value="1">Una</option><option value="2">Dos</option></select></div>
+<div class="row">
+<div><label>Próx + (lb)</label><input class="next" type="number" min="0" step="0.5" placeholder="Por lado en barra"></div>
+<div><label>Ult + (lb)</label><input class="last" type="number" min="0" step="0.5" placeholder="Por lado en barra"></div>
+</div>
+<label>Notas</label><textarea class="notes" rows="2" placeholder="Anotaciones libres"></textarea>
+${old?`<p class="small">Última sesión: ${esc(old.equipment==="bar"?"B":old.equipment==="weights"?"P":"")}${esc(old.weight)} lb${old.next?` · Meta +${esc(old.next)} lb`:""}</p>`:""}
+</div>`;
+}).join("");
+document.querySelectorAll(".track").forEach(el=>{
+const old=last?.entries?.find(e=>e.name===el.dataset.track);
+if(!old)return;
+el.querySelector(".equipment").value=old.equipment||"none";
+el.querySelector(".weight").value=old.weight??"";
+el.querySelector(".qty").value=old.qty||"1";
+el.querySelector(".quantity").classList.toggle("hidden",old.equipment!=="weights");
+el.querySelector(".next").value=old.next??"";
+});
+}
+function changeEquipment(el){
+const box=el.closest(".track");
+box.querySelector(".quantity").classList.toggle("hidden",el.value!=="weights");
+}
+function saveSession(){
+const entries=[...document.querySelectorAll(".track")].map(el=>{
+const get=c=>el.querySelector("."+c).value;
+return {name:el.dataset.track,equipment:get("equipment"),weight:get("weight"),
+qty:get("qty"),next:get("next"),last:get("last"),notes:get("notes")};
+}).filter(e=>e.equipment!=="none"||e.notes||e.next||e.last);
+if(!entries.length){alert("Registra al menos un ejercicio");return}
+if(entries.some(e=>e.equipment!=="none"&&(e.weight===""||Number(e.weight)<0))){
+alert("Revisa los pesos de los ejercicios");return}
+db.sessions.push({id:Date.now(),routine:$("routine").value,date:$("date").value,entries});
+try{save()}catch(e){alert("No se pudo guardar. Revisa el almacenamiento.");return}
+alert("Entrenamiento guardado");
+renderTracks();
+}
+function renderHistory(){
+const list=[...db.sessions].reverse();
+$("historyList").innerHTML=list.length?list.map(s=>`
+<div class="track"><b>Bodypump ${esc(s.routine)} · ${esc(s.date)}</b>
+${s.entries.map(e=>`<p><b>${esc(e.name)}</b>: ${e.equipment==="bar"?"B":e.equipment==="weights"?"P":"—"}${esc(e.weight)}${e.equipment==="weights"?` (${esc(e.qty)} pesa/s)`:""}${e.next?` · Próx +${esc(e.next)}`:""}${e.last?` · Ult +${esc(e.last)}`:""}${e.notes?`<br><span class="small">${esc(e.notes)}</span>`:""}</p>`).join("")}
+<button class="danger" onclick="deleteSession(${s.id})">Eliminar sesión</button></div>`).join(""):"Todavía no hay sesiones guardadas.";
+}
+function deleteSession(id){
+if(!confirm("¿Eliminar esta sesión?"))return;
+db.sessions=db.sessions.filter(s=>s.id!==id);save();renderHistory();
+}
+function exportData(){
+const blob=new Blob([JSON.stringify(db,null,2)],{type:"application/json"});
+const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+a.download="my-bodypump-respaldo.json";a.click();
+setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function restoreData(event){
+const f=event.target.files[0];if(!f)return;
+const reader=new FileReader();
+reader.onload=()=>{
+try{
+const data=JSON.parse(reader.result);
+if(!Array.isArray(data.routines)||!Array.isArray(data.sessions))throw Error();
+if(!confirm("Esto reemplazará los registros actuales. ¿Continuar?"))return;
+db=data;save();renderRoutines();alert("Respaldo restaurado");
+}catch(e){alert("Archivo de respaldo no válido")}
+};
+reader.readAsText(f);
+}
+$("routine").addEventListener("change",renderTracks);
+renderRoutines();
+</script>
+</body>
+</html>
